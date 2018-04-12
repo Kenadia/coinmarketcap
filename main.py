@@ -1,13 +1,20 @@
 import logging
+import time
 
 import bs4
 import requests
 
+import sms
+
 URL = 'https://coinmarketcap.com/currencies/ethereum/#markets'
 PRICE_COUMN = 'Price'
+SOURCE_COLUMN = 'Source'
 VOLUME_COLUMN = 'Volume (24h)'
 
 _LOG = logging.getLogger(__name__)
+
+RECIPIENTS = {
+}
 
 
 def parse(value, heading):
@@ -63,13 +70,38 @@ def extract_table(url, table_index, parse_fn=None):
   return rows
 
 
-if __name__ == '__main__':
-  logging.basicConfig(level=logging.DEBUG)
-
+def get_price_info():
   rows = extract_table(URL, 0, parse)
+
+  gdax_row = [row for row in rows if row[SOURCE_COLUMN] == 'GDAX'][0]
+  gdax_price = gdax_row[PRICE_COUMN]
 
   total_volume = sum(row[VOLUME_COLUMN] for row in rows)
   numerator = sum(row[VOLUME_COLUMN] * row[PRICE_COUMN] for row in rows)
   weighted_avg_price = numerator / total_volume
 
-  print weighted_avg_price
+  premium = (gdax_price  - weighted_avg_price) / weighted_avg_price * 100
+
+  return gdax_price, weighted_avg_price, premium
+
+
+if __name__ == '__main__':
+  logging.basicConfig(level=logging.DEBUG)
+
+  client = sms.Client()
+
+  start = time.time()
+  while True:
+    elapsed = int(time.time() - start)
+
+    recipients = [number for number, interval in RECIPIENTS.iteritems()
+                  if elapsed % interval == 0]
+
+    if recipients:
+      message = 'GDAX: %.2f avg: %.2f -- %+.1f%%' % get_price_info()
+      _LOG.info('Sending to %d recipients: %s', len(recipients), message)
+
+      for recipient in recipients:
+        client.send(recipient, message)
+
+    time.sleep(1)
